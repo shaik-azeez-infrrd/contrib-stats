@@ -1,12 +1,15 @@
-import React, { FC, useState, useEffect } from 'react';
+import React, { FC, useState } from 'react';
 import styles from './Dashboard.module.scss';
-import { GetResponseDataTypeFromEndpointMethod } from '@octokit/types';
 import { Octokit } from 'octokit';
-import { Container, ListGroup } from 'react-bootstrap';
+import { Container, Navbar } from 'react-bootstrap';
+
+import useUpdateEffect from '../../helpers/useUpdateEffect';
+import DashboardForm from '../DashboardForm/DashboardForm';
+import DashboardStats from '../DashboardStats/DashboardStats';
 
 interface DashboardProps {}
-const octokit = new Octokit({ auth: `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` });
 
+//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
 
 // helper methods
 const isNotOlderThan = (startEpoch: any, dateString: any): boolean => {
@@ -19,16 +22,13 @@ const isNotFromAuthor = (comment: any) => {
     return comment.user && comment.user.login !== "gopalanaika"
 }
 
-const updateAvgComments = (pullsCount: number, commentsCount: number, setStats: Function) => {
-    const avgCommentsPerPR = Math.round(commentsCount / pullsCount)
-    setStats((prevState: any) => ({
-        ...prevState,
-        avgComments: avgCommentsPerPR
-    }))   
+const calculateAvgComments = (pullsCount: number, commentsCount: number): number => {
+    return Math.round(commentsCount / pullsCount)
 }
 
-const updateAvgOpenToCloseTime = (pulls: any, setStats: Function) => {
+const calculateAvgOpenToCloseTime = (pulls: any): number => {
     let pullsOpenToCloseTime: number[] = []
+    let sumOfAllTimesInMins = 0
     pulls.forEach((pull: any) => {
         let createdTimeStamp = Date.parse(pull.created_at)
         let closedTimeStamp = Date.parse(pull.closed_at)
@@ -37,84 +37,134 @@ const updateAvgOpenToCloseTime = (pulls: any, setStats: Function) => {
     })
     
     if(pullsOpenToCloseTime.length > 0) {
-        let sumOfAllTimesInMins = pullsOpenToCloseTime.reduce((sum: number, x: number) => sum + x)
-        let avgTimeInMins = Math.round((sumOfAllTimesInMins) / pullsOpenToCloseTime.length)
-        setStats((prevState: any) => ({
-            ...prevState,
-            avgOpenToCloseInMins: avgTimeInMins})
-        )
+        sumOfAllTimesInMins = pullsOpenToCloseTime.reduce((sum: number, x: number) => sum + x)        
     }
+
+    return Math.round((sumOfAllTimesInMins) / pullsOpenToCloseTime.length)
 }
-// helper methods
 
-const Dashboard: FC<DashboardProps> = () => {
-    let repo = 'infer-ai/idc-portal-ui'
-    let startEpoch = Date.parse('01/01/22')
-    let contributorId: string = "gopalanaika"
-    const [pulls, setPulls] = useState<{}[]>([])
-    const [reviewComments, setComments] = useState<{}[]>([])
-    const [stats, setStats] = useState({totalPulls: 0, avgOpenToCloseInMins: 0, avgComments: 0})
+const getReviewComments = (
+    octokit: Octokit,
+    pulls: any,
+    setIsLoading: Function,
+    setStateCallback: Function) => {
 
-    // on-init
-    useEffect(() => getPulls(), [])
+    let $reviewCommentsRequests: any = []
+    let reviewComments: any[][] | any[] = []
 
-    // on-pulls change
-    useEffect(() => getReviewComments(pulls), [pulls])
+    pulls.forEach((pull: any) => 
+        $reviewCommentsRequests.push(
+            octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}/comments', 
+            {
+                owner: 'infer-ai',
+                repo: 'idc-portal-ui',
+                pull_number: pull.number
+            }).then((response: any) => {
+                if(response.data && response.data.length > 0) {
+                    reviewComments.push(response.data.filter((comment: any) => isNotFromAuthor(comment)))
+                }
+            })
+        )
+    )
 
-    // on-comments change
-    useEffect(() => computeStats(), [reviewComments])
+    Promise.all($reviewCommentsRequests).then(() => setStateCallback(reviewComments)).finally(() => setIsLoading(false))
+}
+
+const getContributors = (
+    octokit: Octokit,
+    repoName: string,
+    setIsLoading: Function,
+    setStateCallback: Function): void => {
+
+    octokit.request('GET /repos/{owner}/{repo}/collaborators?per_page=100', {
+        owner: repoName.split('/')[0],
+        repo: repoName.split('/')[1]
+    })
+    .then((response: any) => {
+        let contributors = response.data
+        contributors = contributors.map((collaborator: any) => collaborator.login)
+        setStateCallback(contributors)
+    }).finally(() => setIsLoading(false))
+}
+
+const getPulls = (
+    octokit: Octokit,
+    startEpoch: number,
+    form: any,
+    setStateCallback: Function) => {
+
+    let filteredPulls: {}[] = []
+    let q = 'q=' + encodeURIComponent(`is:pr is:closed repo:${form.repo} author:${form.contributorId}`)
     
-    const getPulls = () => {
-        let filteredPulls: {}[] = []
-        let q = 'q=' + encodeURIComponent(`is:pr is:closed repo:${repo} author:${contributorId}`)
+    octokit.request(`GET /search/issues?${q}&per_page=100`).then((response: any) => {
+        filteredPulls = response.data && response.data.items
+        filteredPulls = filteredPulls.filter((pull: any) => isNotOlderThan(startEpoch, pull.created_at))
+        setStateCallback(filteredPulls)
+    })
+}
+
+const computeStats = (pulls: any[], reviewComments: any[], setStateCallback: Function): void => {
+    const avgComments = calculateAvgComments(pulls.length, reviewComments.flat().length)
+    const avgOpenToCloseInMins = calculateAvgOpenToCloseTime(pulls)
+    setStateCallback({ totalPulls: pulls.length, avgComments, avgOpenToCloseInMins })
+}
+
+let octokit = new Octokit()
+
+// Component
+const Dashboard: FC<DashboardProps> = React.memo(
+    () => {
+        // let repo = 'infer-ai/idc-portal-ui'
+        let startEpoch = Date.parse('01/01/22')
         
-        octokit.request(`GET /search/issues?${q}&per_page=100`).then(response => {
-            filteredPulls = response.data && response.data.items
-            filteredPulls = filteredPulls.filter((pull: any) => isNotOlderThan(startEpoch, pull.created_at))
-            setPulls(filteredPulls)
-        })
-    }
+        const [contributors, setContributors] = useState<string[]>([])
+        const [isLoading, setIsLoading] = useState(false)
+        const [pulls, setPulls] = useState<{}[]>([])
+        
+        const [reviewComments, setComments] = useState<{}[]>([])
+        const [stats, setStats] = useState({totalPulls: 0, avgOpenToCloseInMins: 0, avgComments: 0})
+                
+        // on pull requests fetch complete
+        useUpdateEffect(() => getReviewComments(octokit, pulls, setIsLoading, setComments), [pulls])
+        // on comments fetch complete
+        useUpdateEffect(() => computeStats(pulls, reviewComments, setStats), [reviewComments])
 
-    const getReviewComments = (pulls: any) => {
-        let $reviewCommentsRequests: any = []
-        let reviewComments: any[][] | any[] = []
-    
-        pulls.forEach((pull: any) => 
-            $reviewCommentsRequests.push(
-                octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}/comments', 
-                {
-                    owner: 'infer-ai',
-                    repo: 'idc-portal-ui',
-                    pull_number: pull.number
-                }).then(response => {
-                    if(response.data && response.data.length > 0) {
-                        reviewComments.push(response.data.filter(comment => isNotFromAuthor(comment)))
-                    }
-                })
-            )
-        )
-    
-        Promise.all($reviewCommentsRequests).then(() => setComments(reviewComments))
-    }
+        const handleFetchUsers = (event: any, repoName: string) => {
+            getContributors(octokit, repoName, setIsLoading, setContributors)
+        }
 
-    const computeStats = () => {
-        setStats((prevState) => ({
-            ...prevState,
-            totalPulls: pulls.length
-        }))
-        updateAvgComments(pulls.length, reviewComments.flat().length, setStats)
-        updateAvgOpenToCloseTime(pulls, setStats)
+        const handleAuthTokenUpdate = (authToken: string) => {
+            octokit = new Octokit({auth: authToken})
+        }
+        
+        // on form submit
+        const handleFormSubmit = (event: any, formData: any) => {
+            event.preventDefault()
+            setIsLoading(true)
+            getPulls(octokit, startEpoch, formData, setPulls)
+        }
+        
+        return (
+            <>
+                <Navbar bg="dark" variant="dark">
+                        <Container>
+                            <Navbar.Brand href="#home">Contributor Stats</Navbar.Brand>
+                        </Container>
+                </Navbar>
+                <Container className={styles.Dashboard} data-testid="Dashboard" fluid>
+                    <DashboardForm
+                        handleAuthTokenUpdate={handleAuthTokenUpdate}
+                        contributors={contributors}
+                        handleFetchUsers={handleFetchUsers}
+                        isLoading={isLoading}
+                        handleFormSubmit={handleFormSubmit} >
+                    </DashboardForm>
+                    <DashboardStats stats={stats}></DashboardStats>
+                    
+                </Container>
+            </>
+        );
     }
-    
-    return (
-        <Container className={styles.Dashboard} data-testid="Dashboard">
-            <ListGroup variant="flush">
-                <ListGroup.Item>Total Pulls: {stats.totalPulls}</ListGroup.Item>
-                <ListGroup.Item>Avg. Comments Per Pull: {stats.avgComments}</ListGroup.Item>
-                <ListGroup.Item>Avg. time between Pull creation and merge: {stats.avgOpenToCloseInMins}</ListGroup.Item>
-            </ListGroup>
-        </Container>
-    );
-}
+)
 
 export default Dashboard;
