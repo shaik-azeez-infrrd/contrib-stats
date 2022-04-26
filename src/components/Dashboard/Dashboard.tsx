@@ -6,12 +6,13 @@ import { Container, Navbar } from 'react-bootstrap';
 import useUpdateEffect from '../../helpers/useUpdateEffect';
 import DashboardForm from '../DashboardForm/DashboardForm';
 import DashboardStats from '../DashboardStats/DashboardStats';
+import MetricsTable from '../MetricsTable/MetricsTable';
 
 interface DashboardProps {}
 
 //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
 
-// helper methods
+// helper methhods
 const isNotOlderThan = (startEpoch: any, dateString: any): boolean => {
     const entryEpoch = Date.parse(dateString)
 
@@ -32,7 +33,7 @@ const calculateAvgOpenToCloseTime = (pulls: any): number => {
     pulls.forEach((pull: any) => {
         let createdTimeStamp = Date.parse(pull.created_at)
         let closedTimeStamp = Date.parse(pull.closed_at)
-        let timeToClosureInMins = (closedTimeStamp - createdTimeStamp) / 60000
+        let timeToClosureInMins = (closedTimeStamp - createdTimeStamp) / 3600000
         pullsOpenToCloseTime.push(timeToClosureInMins)
     })
     
@@ -103,10 +104,47 @@ const getPulls = (
     })
 }
 
+const calculatePullsWithNoChanges = (totalPulls: number, PRWithComments: number): number => {
+    let pullsWithNoChanges = totalPulls - PRWithComments
+    return pullsWithNoChanges
+}
+
+const calculateHighestReviewComments = (reviewComments: any): number => {
+    let highestComments = 0
+    const noOfCommentsPerPR = reviewComments.map((comments: any) => comments.length)
+    noOfCommentsPerPR.forEach((commentCount: number) => {
+        if(commentCount > highestComments)
+            highestComments = commentCount
+    })
+
+    return highestComments
+}
+
 const computeStats = (pulls: any[], reviewComments: any[], setStateCallback: Function): void => {
     const avgComments = calculateAvgComments(pulls.length, reviewComments.flat().length)
     const avgOpenToCloseInMins = calculateAvgOpenToCloseTime(pulls)
-    setStateCallback({ totalPulls: pulls.length, avgComments, avgOpenToCloseInMins })
+    const pullsWithNoChanges = calculatePullsWithNoChanges(pulls.length, reviewComments.length)
+    const highestCommentsOnPR = calculateHighestReviewComments(reviewComments)
+    setStateCallback({ totalPulls: pulls.length, avgComments, avgOpenToCloseInMins, pullsWithNoChanges, highestCommentsOnPR })
+}
+
+const getContributorMetrics = (formData: any, setIsLoading: Function, setStateCallback: Function): void => {
+    let repoName = formData.repo 
+    let contributorId = formData.contributorId
+    octokit.request('GET /repos/{owner}/{repo}/stats/contributors', {
+        owner: repoName.split('/')[0],
+        repo: repoName.split('/')[1]
+    })
+    .then((response: any) => {
+        let selectedContributorMetrics = 
+            response.data.find((entry: any) => 
+            entry.author && entry.author.login === contributorId
+        )
+        const weeklyMetrics = selectedContributorMetrics.weeks.slice(-12)
+        setStateCallback(weeklyMetrics)
+        // selectedContributorMetrics && selectedContributorMetrics
+        // metric based rank with the team
+    })
 }
 
 let octokit = new Octokit()
@@ -115,14 +153,19 @@ let octokit = new Octokit()
 const Dashboard: FC<DashboardProps> = React.memo(
     () => {
         // let repo = 'infer-ai/idc-portal-ui'
-        let startEpoch = Date.parse('01/01/22')
+        let today = new Date()
+        let startDate: Date = today
+        startDate.setMonth(today.getMonth() - 2)
+        startDate.setDate(1)
+        let startEpoch = Number(startDate)
         
         const [contributors, setContributors] = useState<string[]>([])
         const [isLoading, setIsLoading] = useState(false)
         const [pulls, setPulls] = useState<{}[]>([])
+        const [contributorMetrics, setMetrics] = useState<{w: number, a: number, d: number, c: number}[]>([])
         
         const [reviewComments, setComments] = useState<{}[]>([])
-        const [stats, setStats] = useState({totalPulls: 0, avgOpenToCloseInMins: 0, avgComments: 0})
+        const [stats, setStats] = useState({totalPulls: 0, avgOpenToCloseInMins: 0, avgComments: 0, pullsWithNoChanges: 0, highestCommentsOnPR: 0})
                 
         // on pull requests fetch complete
         useUpdateEffect(() => getReviewComments(octokit, pulls, setIsLoading, setComments), [pulls])
@@ -142,6 +185,7 @@ const Dashboard: FC<DashboardProps> = React.memo(
             event.preventDefault()
             setIsLoading(true)
             getPulls(octokit, startEpoch, formData, setPulls)
+            getContributorMetrics(formData, setIsLoading, setMetrics)
         }
         
         return (
@@ -149,6 +193,7 @@ const Dashboard: FC<DashboardProps> = React.memo(
                 <Navbar bg="dark" variant="dark">
                         <Container>
                             <Navbar.Brand href="#home">Contributor Stats</Navbar.Brand>
+                            <Navbar.Text>Computed from: {startDate.toDateString()}</Navbar.Text>
                         </Container>
                 </Navbar>
                 <Container className={styles.Dashboard} data-testid="Dashboard" fluid>
@@ -160,7 +205,7 @@ const Dashboard: FC<DashboardProps> = React.memo(
                         handleFormSubmit={handleFormSubmit} >
                     </DashboardForm>
                     <DashboardStats stats={stats}></DashboardStats>
-                    
+                    <MetricsTable metrics={contributorMetrics}></MetricsTable>
                 </Container>
             </>
         );
