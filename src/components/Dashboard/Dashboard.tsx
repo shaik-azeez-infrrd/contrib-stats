@@ -10,8 +10,6 @@ import MetricsTable from '../MetricsTable/MetricsTable';
 
 interface DashboardProps {}
 
-//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
-
 // helper methhods
 const isNotOlderThan = (startEpoch: any, dateString: any): boolean => {
     const entryEpoch = Date.parse(dateString)

@@ -9,10 +9,14 @@ interface MetricsTableProps {
 const MetricsTable: FC<MetricsTableProps> = React.memo(
     ({metrics}: MetricsTableProps) => {
         return (
-            <Container>
+            <Container className={styles.metricsSection}>
                 <Row>
-                    <Col lg={{span: 10,  offset: 1}}>
-                        <Table className={styles.metricTable} striped hover>
+                    <Col lg={{span: 11,  offset: 1}}>
+                        <h5>Weekly Contribution Break-down</h5>
+                    </Col>
+
+                    <Col className={styles.tableWrapper} lg={{span: 10,  offset: 1}}>
+                        <Table  striped hover>
                             <thead>
                                 <tr>
                                 <th>Week #</th>
@@ -29,7 +33,6 @@ const MetricsTable: FC<MetricsTableProps> = React.memo(
                                         <td>{metricRow.d}</td>
                                         <td>{metricRow.c}</td>
                                     </tr>
-                                    
                                 )}                       
                             </tbody>
                         </Table>
