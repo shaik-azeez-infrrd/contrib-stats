@@ -126,7 +126,7 @@ const computeStats = (pulls: any[], reviewComments: any[], setStateCallback: Fun
     setStateCallback({ totalPulls: pulls.length, avgComments, avgOpenToCloseInMins, pullsWithNoChanges, highestCommentsOnPR })
 }
 
-const getContributorMetrics = (formData: any, setIsLoading: Function, setStateCallback: Function): void => {
+const getContributorMetrics = (formData: any, setStateCallback: Function): void => {
     let repoName = formData.repo 
     let contributorId = formData.contributorId
     octokit.request('GET /repos/{owner}/{repo}/stats/contributors', {
@@ -150,12 +150,10 @@ let octokit = new Octokit()
 // Component
 const Dashboard: FC<DashboardProps> = React.memo(
     () => {
-        // let repo = 'infer-ai/idc-portal-ui'
         let today = new Date()
-        let startDate: Date = today
-        startDate.setMonth(today.getMonth() - 2)
-        startDate.setDate(1)
-        let startEpoch = Number(startDate)
+        today.setDate(1)
+        today.setMonth(today.getMonth() - 2)
+        let startEpoch = Number(today)
         
         const [contributors, setContributors] = useState<string[]>([])
         const [isLoading, setIsLoading] = useState(false)
@@ -183,7 +181,7 @@ const Dashboard: FC<DashboardProps> = React.memo(
             event.preventDefault()
             setIsLoading(true)
             getPulls(octokit, startEpoch, formData, setPulls)
-            getContributorMetrics(formData, setIsLoading, setMetrics)
+            getContributorMetrics(formData, setMetrics)
         }
         
         return (
@@ -191,7 +189,7 @@ const Dashboard: FC<DashboardProps> = React.memo(
                 <Navbar bg="dark" variant="dark">
                         <Container>
                             <Navbar.Brand href="#home">Contributor Stats</Navbar.Brand>
-                            <Navbar.Text>Computed from: {startDate.toDateString()}</Navbar.Text>
+                            <Navbar.Text>Computed from: {today.toDateString()}</Navbar.Text>
                         </Container>
                 </Navbar>
                 <Container className={styles.Dashboard} data-testid="Dashboard" fluid>
