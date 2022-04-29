@@ -5,7 +5,7 @@ This project was bootstrapped with [Create React App](https://github.com/faceboo
 ### Pre-requisites
 
  - Personal Access Token, of the user having read access to the repo
- - The App currently works only for a quarter (mentions the startDate on Top-left corner of the navbar)
+ - The App currently works only for a quarter (mentions the startDate on Top-right corner of the navbar)
  
 ### Usage
 
